@@ -1,8 +1,5 @@
 # Benchmark & Observability Report — Day 14
 
-> Copy file này thành `BENCHMARK_REPORT.md` trong repo của bạn và điền đầy đủ.
-> Mọi con số phải lấy từ report JSON / CSV / screenshot thật, không ước lượng.
-
 **Họ tên:** Hà Huy Thái — 2A202603682
 **Ngày chạy:** 2026-11-25
 **Môi trường:** Windows 11, WSL2, Docker Desktop 4.99.0; benchmark local chạy trong Python virtual environment.
@@ -71,36 +68,39 @@ v2 dùng retrieval nên tăng accuracy từ 4.35% lên 91.30%, đổi lại aver
 
 ### 4.1 Screenshot
 
-- [ ] Dashboard Grafana khi đang có tải (thấy rõ Golden Signals)
-- [ ] Một trace chậm trong Jaeger (thấy span nào chiếm thời gian)
-- [ ] Một trace lỗi trong Jaeger (có event `exception`)
-- [ ] Trang Alerts của Prometheus với ít nhất 1 alert đang **firing**
+- [x] Dashboard Grafana khi đang có tải (thấy rõ Golden Signals): `screenshots/grafana-dashboard.png`.
+- [x] Một trace chậm trong Jaeger (thấy span nào chiếm thời gian): `screenshots/jaeger-slow-trace.png`.
+- [x] Một trace lỗi trong Jaeger (có event `exception`): `screenshots/jaeger-error-trace.png`.
+- [x] Trang Alerts của Prometheus với ít nhất 1 alert đang **firing**: `screenshots/prometheus-alert-firing.png` có đồng thời `AgentHighErrorRate` và `AgentHighLatencyP95` firing.
 
 ### 4.2 Thí nghiệm "phá hệ thống"
 
+Thí nghiệm A và B được kích hoạt cùng trong một lần tải Locust 4 phút để quan sát đồng thời lỗi upstream và tail latency; các alert được đối chiếu theo rule tương ứng.
+
 | # | Thay đổi | Alert nào firing | Thời gian từ lúc đổi → firing | Panel nào phản ánh rõ nhất |
 |---|---|---|---|---|
-| A | `MOCK_ERROR_RATE=0.2` | | | |
-| B | `MOCK_SLOW_RATE=0.3` | | | |
-| C | `LLM_MODEL=mock-llm-large` | | | |
-| D | `docker pause` 1 instance | | | |
-| E | `AGENT_VERSION=v1` | | | |
+| A | `MOCK_ERROR_RATE=0.2` | `AgentHighErrorRate` | ≈ 1 phút | Error rate `/ask`; Jaeger có trace 503 và event `exception` |
+| B | `MOCK_SLOW_RATE=0.3` | `AgentHighLatencyP95` | ≈ 2 phút | Latency `/ask` p95/p99 và trace span `chat mock-llm-small` |
+| C | `LLM_MODEL=mock-llm-large` | `LLMCostBurnRateHigh` | ≈ 2 phút | Cost burn rate (USD/giờ); quan sát vượt ngưỡng $2/giờ |
+| D | `docker pause` 1 instance | `AgentInstanceDown` | ≈ 1 phút | Instances up giảm; alert xác nhận Prometheus không scrape được một agent |
+| E | `AGENT_VERSION=v1` | Không có alert mới | Không áp dụng | Bảng phiên bản chạy hiện `v1`; retrieval hit ratio không có dữ liệu v2 mới |
 
 **Thí nghiệm E không làm alert nào firing. Bạn sẽ phát hiện loại sự cố này trong production bằng cách nào?**
 
-...
+Sự cố chất lượng ở E không thể chỉ dựa vào health check, latency hay error rate. Trong production cần chạy golden-dataset eval theo lịch hoặc sau mỗi deployment, đặt quality gate không regression so với baseline, theo dõi retrieval hit ratio và gắn `agent_version` vào metric/trace để đối chiếu canary giữa v1 và v2.
 
 ### 4.3 Debug bằng trace
 
-Chọn 1 trace chậm nhất bạn tìm được:
+Chọn một trace chậm được tạo sau khi đã phục hồi cấu hình baseline v2:
 
-- `trace_id`: ...
-- Tổng thời gian: ... ms
-- Span chiếm nhiều thời gian nhất: ... (... ms, ...%)
-- Dòng log tương ứng (grep theo `trace_id`):
+- `trace_id`: `9a3daa2492b14f7c978241009508589b`
+- Tổng thời gian: 1700.1 ms
+- Span chiếm nhiều thời gian nhất: `chat mock-llm-small` (1672.4 ms, khoảng 98.4%)
+- Dòng log tương ứng (lọc theo `trace_id`):
 
 ```json
-
+{"ts":"2026-11-25T12:58:50.166430+00:00","level":"INFO","service":"observable-agent","instance":"11c997c727f0","event":"llm_call","trace_id":"9a3daa2492b14f7c978241009508589b","request_id":"5905251fbbd3","model":"mock-llm-small","agent_version":"v2","input_tokens":80,"output_tokens":46,"cost_usd":0.00004,"llm_ms":1672.4}
+{"ts":"2026-11-25T12:58:50.167778+00:00","level":"INFO","service":"observable-agent","instance":"11c997c727f0","event":"http_request","trace_id":"9a3daa2492b14f7c978241009508589b","request_id":"5905251fbbd3","method":"POST","route":"/ask","status":200,"ms":1700.1}
 ```
 
 ---
@@ -119,9 +119,9 @@ Chọn 1 trace chậm nhất bạn tìm được:
 ## 6. Kết luận
 
 - 3 điều bạn học được về benchmark & observability:
-  1. ...
-  2. ...
-  3. ...
+  1. Throughput tăng theo concurrency chỉ đến một ngưỡng; c=100 làm p95 tăng lên 3361.0 ms dù error rate vẫn thấp.
+  2. Average latency che giấu tail latency: `MOCK_SLOW_RATE=0.1` có average 340.6 ms nhưng p95 lên 1691.0 ms.
+  3. Metrics cho biết mức độ ảnh hưởng, trace cho biết span gây chậm/lỗi và JSON log cùng `trace_id` nối được request với dữ liệu vận hành.
 - Nếu đưa agent này lên production thật, bạn sẽ thêm metric / alert nào nữa?
 
-...
+Thêm alert cho tỷ lệ regression của golden-dataset/canary theo `agent_version`, tỷ lệ retrieval không có context, saturation CPU/memory và queue depth. Các chỉ số này bổ sung phần quality và khả năng cạn tài nguyên mà HTTP health check không phản ánh đủ.

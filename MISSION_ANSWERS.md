@@ -1,9 +1,5 @@
 # Day 14 Lab — Mission Answers
 
-**Họ tên:** [Điền họ tên]  
-**MSSV:** [Điền MSSV]  
-**Ngày thực hiện:** 25/11/2026
-
 ## Part 1: Localhost vs Production
 
 ### Exercise 1.1: Anti-patterns found
