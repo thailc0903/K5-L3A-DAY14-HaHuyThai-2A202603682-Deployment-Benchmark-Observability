@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir --user -r requirements.txt
 # Stage 2: Runtime
 FROM python:3.11-slim AS runtime
 
-RUN groupadd -r agent && useradd -r -g agent -d /app agent
+RUN groupadd -r agent && useradd -r -g agent -d /home/agent -m agent
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ COPY --from=builder /root/.local /home/agent/.local
 COPY app/ ./app/
 COPY utils/ ./utils/
 
-RUN chown -R agent:agent /app
+RUN chown -R agent:agent /app /home/agent
 
 USER agent
 
